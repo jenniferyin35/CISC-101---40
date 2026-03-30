@@ -2,9 +2,17 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-export interface CampaignResult {
+export interface CampaignState {
+  campaignType: string;
+  targetAudience: string;
+  tone: string;
+  productInfo: string;
+}
+
+export interface CampaignResponse {
   status: "success" | "clarification_needed";
-  clarification_question?: string;
+  updatedState: CampaignState;
+  message: string; // The question to ask or the success message
   campaign?: {
     subjectLines: string[];
     previewText: string;
@@ -14,44 +22,65 @@ export interface CampaignResult {
   };
 }
 
-export async function generateCampaign(
-  campaignType: string,
-  targetAudience: string,
-  tone: string,
-  productInfo: string
-): Promise<CampaignResult> {
+export async function processCampaignInput(
+  userInput: string,
+  currentState: CampaignState
+): Promise<CampaignResponse> {
   const prompt = `
-    You are an AI Email Marketing Campaign Generator.
-    Your task is to create a complete email campaign based on the following user input:
-    - Campaign Type: ${campaignType}
-    - Target Audience: ${targetAudience}
-    - Tone: ${tone}
-    - Product or Service Information: ${productInfo}
+    You are an AI Email Marketing Campaign Builder. 
+    Your goal is to collect exactly 4 pieces of information from the user before generating a campaign:
+    1. Campaign Type
+    2. Target Audience
+    3. Tone
+    4. Product or Service Information
 
-    RULES:
-    1. If the input is vague, incomplete, or instructions conflict, set status to "clarification_needed" and provide a "clarification_question".
-    2. If the input is sufficient, set status to "success" and generate the campaign.
-    3. The campaign MUST have exactly these five sections in this order:
-       - Subject Lines (attention-grabbing and varied)
-       - Preview Text (supports subject line)
-       - Email Body (introduction -> value -> explanation -> closing)
-       - Call to Action (clear next step)
-       - Supporting Visuals (reinforce message)
-    4. Do NOT invent customer names, specific metrics, purchase history, or company data.
-    5. Ensure outputs are realistic and appropriate.
-    6. Keep the response concise and readable.
+    CURRENT STATE:
+    - Campaign Type: ${currentState.campaignType || "Missing"}
+    - Target Audience: ${currentState.targetAudience || "Missing"}
+    - Tone: ${currentState.tone || "Missing"}
+    - Product/Service Info: ${currentState.productInfo || "Missing"}
 
-    FEW-SHOT EXAMPLE:
-    Input: "Promote a 20% off sale for a clothing brand targeting university students"
+    USER INPUT: "${userInput}"
+
+    TASK:
+    1. Parse the USER INPUT to update the CURRENT STATE.
+    2. If any of the 4 fields are still missing or vague, set status to "clarification_needed".
+    3. In "message", ask for the NEXT missing piece of information. Ask for details ONE AT A TIME. Do not make assumptions.
+    4. ONLY if ALL 4 fields are present and clear, set status to "success" and generate the campaign.
+
+    STRICT GENERATION RULES (Only for "success" status):
+    - Subject Lines: Exactly 3 varied, attention-grabbing options.
+    - Preview Text: Exactly 1 complete sentence that supports the subject lines.
+    - Email Body: Minimum of 3–5 sentences. Structure: Intro -> Value -> Explanation -> Closing.
+    - Call to Action: Exactly 1 clear action phrase.
+    - Supporting Visuals: Exactly 2 ideas that reinforce the message.
+    - No section can be empty, blank, or contain placeholders.
+    - Do NOT invent customer names, metrics, or false claims. Keep content realistic.
+    - CRITICAL: If any section is missing or too short, you MUST regenerate it internally before outputting the final JSON.
+
+    REQUIRED OUTPUT STRUCTURE:
+    1. Subject Lines
+    2. Preview Text
+    3. Email Body
+    4. Call to Action
+    5. Supporting Visuals
+
+    FEW-SHOT EXAMPLE (Clarification):
+    User: "I want to promote a sale."
+    Output: {
+      "status": "clarification_needed",
+      "updatedState": { "campaignType": "Sale Promotion", "targetAudience": "", "tone": "", "productInfo": "" },
+      "message": "Hello! I am your Campaign Buddy. What would you like help with today? (Wait, I see you want a sale promotion). Great! Who is the target audience for this sale?"
+    }
+
+    FEW-SHOT EXAMPLE (Success):
+    User: "It's for university students, 20% off clothing, playful tone."
+    (Assuming other fields were already partially known or provided here)
     Output: {
       "status": "success",
-      "campaign": {
-        "subjectLines": ["20% Off Everything — This Week Only", "Student Deals You Don’t Want to Miss", "Your Wardrobe Upgrade Starts Now"],
-        "previewText": "Save on your favorite styles before the sale ends.",
-        "emailBody": "Hi there,\n\nLooking to refresh your wardrobe without breaking the bank? For a limited time, enjoy 20% off all items. Whether you're heading to class or going out with friends, we’ve got styles that fit every moment. Don’t wait — this offer ends soon.",
-        "callToAction": "Shop Now",
-        "supportingVisuals": ["Image of students wearing casual outfits", "Sale banner with '20% Off'"]
-      }
+      "updatedState": { ... },
+      "message": "Excellent! Here is your complete email campaign:",
+      "campaign": { ... }
     }
   `;
 
@@ -64,52 +93,55 @@ export async function generateCampaign(
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            status: {
-              type: Type.STRING,
-              description: "Whether the campaign was successfully generated or if clarification is needed.",
-              enum: ["success", "clarification_needed"],
+            status: { type: Type.STRING, enum: ["success", "clarification_needed"] },
+            updatedState: {
+              type: Type.OBJECT,
+              properties: {
+                campaignType: { type: Type.STRING },
+                targetAudience: { type: Type.STRING },
+                tone: { type: Type.STRING },
+                productInfo: { type: Type.STRING },
+              },
+              required: ["campaignType", "targetAudience", "tone", "productInfo"],
             },
-            clarification_question: {
-              type: Type.STRING,
-              description: "The question to ask the user if more information is needed.",
-            },
+            message: { type: Type.STRING },
             campaign: {
               type: Type.OBJECT,
               properties: {
-                subjectLines: {
-                  type: Type.ARRAY,
+                subjectLines: { 
+                  type: Type.ARRAY, 
                   items: { type: Type.STRING },
-                  description: "A list of subject lines.",
+                  description: "Exactly 3 subject lines."
                 },
-                previewText: {
+                previewText: { 
                   type: Type.STRING,
-                  description: "The preview text for the email.",
+                  description: "Exactly 1 complete sentence."
                 },
-                emailBody: {
+                emailBody: { 
                   type: Type.STRING,
-                  description: "The main body of the email.",
+                  description: "3-5 sentences minimum."
                 },
-                callToAction: {
+                callToAction: { 
                   type: Type.STRING,
-                  description: "The call to action text.",
+                  description: "1 clear action phrase."
                 },
-                supportingVisuals: {
-                  type: Type.ARRAY,
+                supportingVisuals: { 
+                  type: Type.ARRAY, 
                   items: { type: Type.STRING },
-                  description: "Suggestions for supporting visuals.",
+                  description: "Exactly 2 visual ideas."
                 },
               },
               required: ["subjectLines", "previewText", "emailBody", "callToAction", "supportingVisuals"],
             },
           },
-          required: ["status"],
+          required: ["status", "updatedState", "message"],
         },
       },
     });
 
-    return JSON.parse(response.text || "{}") as CampaignResult;
+    return JSON.parse(response.text || "{}") as CampaignResponse;
   } catch (error) {
-    console.error("Error generating campaign:", error);
+    console.error("Error processing campaign input:", error);
     throw error;
   }
 }
