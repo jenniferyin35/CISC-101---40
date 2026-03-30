@@ -119,10 +119,10 @@ export default function App() {
             <h3 className="text-[11px] uppercase tracking-widest font-bold text-[#888]">Campaign Progress</h3>
             <div className="space-y-4">
               {[
-                { label: "Type", val: state.campaignType, icon: Mail },
-                { label: "Audience", val: state.targetAudience, icon: Users },
-                { label: "Tone", val: state.tone, icon: MessageSquare },
-                { label: "Product", val: state.productInfo, icon: Info },
+                { label: "campaign type", val: state.campaignType, icon: Mail },
+                { label: "target audience", val: state.targetAudience, icon: Users },
+                { label: "tone", val: state.tone, icon: MessageSquare },
+                { label: "product or service", val: state.productInfo, icon: Info },
               ].map((item, i) => (
                 <div key={i} className="flex items-center gap-3">
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center border ${isFieldComplete(item.val) ? "bg-green-500 border-green-500 text-white" : "bg-white border-[#e5e5e5] text-[#ccc]"}`}>
